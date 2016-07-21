@@ -8,11 +8,55 @@
 
 namespace gazebo
 {
+
+
+class PortCallback : public yarp::os::PortReader
+{
+public:
+    PortCallback(physics::ModelPtr newModelPtr)
+    : internalModelPtr(newModelPtr)
+    , PortReader()
+    {
+        rightFoot = internalModelPtr->GetJoint("fixed right to ground");
+        leftFoot = internalModelPtr->GetJoint("fixed left to ground");
+    }
+
+    PortCallback()
+    {
+        // do nothing.
+    }
+
+    virtual bool read(yarp::os::ConnectionReader& connection) {
+        std::cout << "read" << std::endl;
+        yarp::os::Bottle b;
+        bool ok = b.read(connection);
+        if (!ok) {
+            return false;
+        } else {
+            processBottle(b);
+            return true;
+        }
+    }
+
+private:
+    void processBottle(const yarp::os::Bottle& b) {
+        std::cout << "processBottle" << std::endl;
+        std::cout << "Detaching Feet!" << std::endl;
+        leftFoot->Detach();
+        rightFoot->Detach();
+        leftFoot->SetProvideFeedback(false);
+        rightFoot->SetProvideFeedback(false);
+    }
+    physics::JointPtr leftFoot, rightFoot;
+    physics::ModelPtr internalModelPtr;
+};
+
 class YarpDetachJoint : public ModelPlugin
 {
 public:
     yarp::os::Network yarp;
     yarp::os::BufferedPort<yarp::os::Bottle> port;
+    PortCallback callback;
 
     YarpDetachJoint()
     {
@@ -27,15 +71,9 @@ public:
     {
         this->model = _parent;
         port.open("/"+this->model->GetName()+":detach");
-        calledAlready = false;
-        counter = 0;
-        std::cout << "Test" << std::endl;
-        leftFoot = this->model->GetJoint("fixed right to ground");
-        rightFoot = this->model->GetJoint("fixed left to ground");
+        callback = PortCallback(this->model);
+        port.setReader(callback);
 
-        if (leftFoot) {
-            std::cout << "Got leftFoot pointer" << std::endl;
-        }
         this->updateConnection = event::Events::ConnectWorldUpdateBegin(boost::bind(&YarpDetachJoint::OnUpdate, this, _1));
 
     }
@@ -43,48 +81,26 @@ public:
     // Called by the world update start event
     void OnUpdate(const common::UpdateInfo & /*_info*/)
     {
+        // Original Method.
+
         // yarp::os::Bottle *input = port.read(false);
-        if (!calledAlready && counter>=5000) {
-            // std::cout << input->toString() << std::endl;
-            // if (input->get(0).asBool()) {
-                this->worldConnection = event::Events::ConnectWorldUpdateBegin(
-                boost::bind(&YarpDetachJoint::detachFeet, this));
-            // }
-        }
+        // if (input!=NULL) {
+        //     std::cout << "Detaching Feet!" << std::endl;
+        //     physics::JointPtr rightFoot = this->model->GetJoint("fixed right to ground");
+        //     physics::JointPtr leftFoot = this->model->GetJoint("fixed left to ground");
+        //     leftFoot->Detach();
+        //     rightFoot->Detach();
+        //     leftFoot->SetProvideFeedback(false);
+        //     rightFoot->SetProvideFeedback(false);
+        // }
 
-        if (counter<=5000){
-            ++counter;
-            // std::cout << "counter: " << counter << std::endl;
-        }
-
-    }
-
-    void detachFeet()
-    {
-        calledAlready = true;
-        leftFoot->Detach();
-        rightFoot->Detach();
-        leftFoot->SetProvideFeedback(false);
-        rightFoot->SetProvideFeedback(false);
-        std::cout << "Detaching feet from the ground. You may now proceed with the experiment." << std::endl;
-        port.close();
-        event::Events::DisconnectWorldUpdateBegin(this->worldConnection);
     }
 
 private:
     // Pointer to the model
     physics::ModelPtr model;
-
-    physics::JointPtr leftFoot, rightFoot;
-
     // Pointer to the update event connection
     event::ConnectionPtr updateConnection;
-    event::ConnectionPtr worldConnection;
-
-    // Have we already detached the feet?
-    bool calledAlready;
-
-    int counter;
 };
 
 // Register this plugin with the simulator
